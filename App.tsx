@@ -66,6 +66,15 @@ const App: React.FC = () => {
     prefetchedHintPromiseRef.current = getHint(question);
   }, []);
 
+  const generateNewQuestion = (country: any): Question => {
+      const questionType: QuestionType = Math.random() > 0.5 ? 'ask_capital' : 'ask_country';
+      const newQuestion: Question = { country, type: questionType };
+      if (questionType === 'ask_country') {
+        newQuestion.capitalInQuestion = country.capital[Math.floor(Math.random() * country.capital.length)];
+      }
+      return newQuestion;
+  };
+
   const setupNewQuestion = useCallback(async () => {
     setIsCorrect(null);
     setSpellingMistake(false);
@@ -88,9 +97,7 @@ const App: React.FC = () => {
         if (!randomCountry) {
           throw new Error("Could not fetch a new country.");
         }
-        // FIX: Explicitly define the type as QuestionType to prevent it from being inferred as a generic string.
-        const questionType: QuestionType = Math.random() > 0.5 ? 'ask_capital' : 'ask_country';
-        const newQuestion = { country: randomCountry, type: questionType };
+        const newQuestion = generateNewQuestion(randomCountry);
         setCurrentQuestion(newQuestion);
         prefetchAnswerDetails(newQuestion);
         setGameStatus('playing');
@@ -130,8 +137,7 @@ const App: React.FC = () => {
     // Pre-fetch the next question in the background.
     getRandomCountry().then(country => {
         if (country) {
-            const type: QuestionType = Math.random() > 0.5 ? 'ask_capital' : 'ask_country';
-            setNextQuestion({ country, type });
+            setNextQuestion(generateNewQuestion(country));
         }
     }).catch(err => {
         console.error("Failed to pre-fetch next question:", err);
@@ -161,17 +167,16 @@ const App: React.FC = () => {
     e.preventDefault();
     if (!currentQuestion || !userAnswer.trim()) return;
 
-    const correctAnswer = currentQuestion.type === 'ask_capital' 
+    const correctAnswers = currentQuestion.type === 'ask_capital' 
       ? currentQuestion.country.capital 
-      : currentQuestion.country.name;
+      : [currentQuestion.country.name];
     
     const normalize = (str: string) => str.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g,"").replace(/\s+/g, ' ').trim();
     const normalizedUserAnswer = normalize(userAnswer);
-    const normalizedCorrectAnswer = normalize(correctAnswer);
+    const normalizedCorrectAnswers = correctAnswers.map(normalize);
     
-    const distance = levenshteinDistance(normalizedUserAnswer, normalizedCorrectAnswer);
-    const isVeryClose = distance <= 2 && normalizedCorrectAnswer.length > 3;
-    const perfectMatch = normalizedUserAnswer === normalizedCorrectAnswer;
+    const perfectMatch = normalizedCorrectAnswers.includes(normalizedUserAnswer);
+    const isVeryClose = !perfectMatch && normalizedCorrectAnswers.some(ans => levenshteinDistance(normalizedUserAnswer, ans) <= 2 && ans.length > 3);
 
     const correct = perfectMatch || isVeryClose;
     setIsCorrect(correct);
@@ -193,7 +198,7 @@ const App: React.FC = () => {
 
     const questionText = currentQuestion.type === 'ask_capital'
       ? `What is the capital of ${currentQuestion.country.name}?`
-      : `Which country's capital is ${currentQuestion.country.capital}?`;
+      : `Which country's capital is ${currentQuestion.capitalInQuestion}?`;
 
     return (
       <div className="flex flex-col items-center justify-center w-full text-center">
@@ -239,14 +244,29 @@ const App: React.FC = () => {
 
     const resultText = isCorrect ? "Correct!" : "Not quite...";
     const resultColor = isCorrect ? "text-green-600" : "text-red-600";
-    const correctAnswerText = currentQuestion.type === 'ask_capital'
-      ? `The capital of ${currentQuestion.country.name} is ${currentQuestion.country.capital}.`
-      : `${currentQuestion.country.capital} is the capital of ${currentQuestion.country.name}.`;
+    
+    let correctAnswerText: string;
+    if (currentQuestion.type === 'ask_capital') {
+        const capitalText = currentQuestion.country.capital.length > 1 ? 'capitals are' : 'capital is';
+        correctAnswerText = `The ${capitalText} of ${currentQuestion.country.name} is ${currentQuestion.country.capital.join(', ')}.`;
+    } else {
+        correctAnswerText = `${currentQuestion.capitalInQuestion} is a capital of ${currentQuestion.country.name}.`;
+    }
+
+    let spellingMistakeText = '';
+    if (spellingMistake) {
+        if (currentQuestion.type === 'ask_capital') {
+            spellingMistakeText = `The correct answer is ${currentQuestion.country.capital.join(' or ')}.`;
+        } else {
+            spellingMistakeText = `The correct spelling is ${currentQuestion.country.name}.`;
+        }
+    }
+
 
     return (
       <div className="flex flex-col gap-4 w-full">
         <h2 className={`text-3xl font-bold text-center ${resultColor}`}>{resultText}</h2>
-        {spellingMistake && <p className="text-center text-orange-600">The correct spelling is <span className="font-bold">{currentQuestion.type === 'ask_capital' ? currentQuestion.country.capital : currentQuestion.country.name}</span>.</p>}
+        {spellingMistake && <p className="text-center text-orange-600">{spellingMistakeText}</p>}
         {!isCorrect && <p className="text-center text-lg text-gray-700">{correctAnswerText}</p>}
         
         <div className="mt-4 p-4 bg-gray-50 rounded-lg border">

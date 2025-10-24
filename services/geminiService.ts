@@ -18,9 +18,9 @@ export const getRandomCountry = async (): Promise<Country> => {
 export const getHint = async (question: Question): Promise<string> => {
   let prompt: string;
   if (question.type === 'ask_capital') {
-    prompt = `Give me a single, short, one-sentence hint for the capital of ${question.country.name}. Do not include the name '${question.country.capital}' in your answer.`;
+    prompt = `Give me a single, short, one-sentence hint for a capital of ${question.country.name}. Do not include any of the following names in your answer: ${question.country.capital.join(', ')}.`;
   } else {
-    prompt = `Give me a single, short, one-sentence hint for the country whose capital is ${question.country.capital}. Do not include the name '${question.country.name}' in your answer.`;
+    prompt = `Give me a single, short, one-sentence hint for the country whose capital is ${question.capitalInQuestion}. Do not include the name '${question.country.name}' in your answer.`;
   }
 
   try {
@@ -35,8 +35,8 @@ export const getHint = async (question: Question): Promise<string> => {
   }
 };
 
-export const getCountryInfo = async (country: string, capital: string): Promise<{ info: CountryInfo | null; sources: GroundingChunk[] }> => {
-  const prompt = `Provide information about ${country} and its capital ${capital}. Return a JSON object with the following structure:
+export const getCountryInfo = async (country: string, capitals: string[]): Promise<{ info: CountryInfo | null; sources: GroundingChunk[] }> => {
+  const prompt = `Provide information about ${country} and its capital(s) ${capitals.join(' and ')}. Return a JSON object with the following structure:
 - "summary": A succinct, one-paragraph summary.
 - "facts": An array of 2-3 short, fun, memorable facts.
 - "mapQuery": A string suitable for a Google Maps search query to locate the country (e.g., "France").
