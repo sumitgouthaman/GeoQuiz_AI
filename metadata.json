@@ -1,7 +1,5 @@
 {
   "name": "Geo Quiz: Countries and Capitals",
   "description": "A fun and interactive quiz game to help you learn and memorize the world's countries and their capitals, powered by Gemini. Get hints, fun facts, and up-to-date information to boost your geography knowledge.",
-  "requestFramePermissions": [
-    "geolocation"
-  ]
+  "requestFramePermissions": []
 }
