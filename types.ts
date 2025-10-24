@@ -14,12 +14,16 @@ export type GameStatus = 'playing' | 'answered' | 'loading_hint' | 'loading_info
 
 export interface GroundingChunk {
   web?: {
-    uri: string;
-    title: string;
+    // FIX: Made uri optional to match the type from @google/genai SDK.
+    uri?: string;
+    // FIX: Made title optional to match the type from @google/genai SDK.
+    title?: string;
   };
   maps?: {
-    uri: string;
-    title: string;
+    // FIX: Made uri optional to match the type from @google/genai SDK.
+    uri?: string;
+    // FIX: Made title optional to match the type from @google/genai SDK.
+    title?: string;
   }
 }
 

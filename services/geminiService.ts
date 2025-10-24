@@ -1,5 +1,6 @@
 import { GoogleGenAI, Modality, Type } from "@google/genai";
-import { Question, GroundingChunk, CountryInfo, Country } from "./types";
+import { Question, GroundingChunk, CountryInfo, Country } from "../types";
+import { COUNTRIES } from "../constants";
 
 const API_KEY = process.env.API_KEY;
 
@@ -9,30 +10,9 @@ if (!API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-export const getRandomCountry = async (): Promise<Country | null> => {
-    const prompt = `Give me a single random country and its capital. Return it as a clean JSON object with "name" and "capital" keys, without any markdown formatting or extra text.`;
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING },
-                        capital: { type: Type.STRING },
-                    },
-                    required: ['name', 'capital'],
-                },
-            },
-        });
-        const country = JSON.parse(response.text);
-        return country;
-    } catch (error) {
-        console.error("Error fetching random country:", error);
-        return null;
-    }
+export const getRandomCountry = async (): Promise<Country> => {
+    const randomIndex = Math.floor(Math.random() * COUNTRIES.length);
+    return Promise.resolve(COUNTRIES[randomIndex]);
 };
 
 export const getHint = async (question: Question): Promise<string> => {

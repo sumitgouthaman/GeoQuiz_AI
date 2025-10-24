@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Question, GameStatus, GroundingChunk, CountryInfo } from './types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Question, GameStatus, GroundingChunk, CountryInfo, QuestionType } from './types';
 import { getHint, getCountryInfo, getCountryImage, getRandomCountry } from './services/geminiService';
 import LoadingSpinner from './components/LoadingSpinner';
 
@@ -32,6 +32,7 @@ const levenshteinDistance = (a: string, b: string): number => {
 const App: React.FC = () => {
   const [gameStatus, setGameStatus] = useState<GameStatus>('loading_question');
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
+  const [nextQuestion, setNextQuestion] = useState<Question | null>(null);
   const [userAnswer, setUserAnswer] = useState('');
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [spellingMistake, setSpellingMistake] = useState(false);
@@ -41,8 +42,31 @@ const App: React.FC = () => {
   const [sources, setSources] = useState<GroundingChunk[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const prefetchedInfoPromiseRef = useRef<Promise<{ info: CountryInfo | null; sources: GroundingChunk[] }> | null>(null);
+  const prefetchedImagePromiseRef = useRef<Promise<string | null> | null>(null);
+  const prefetchedHintPromiseRef = useRef<Promise<string> | null>(null);
+
+  const prefetchAnswerDetails = useCallback((question: Question | null) => {
+    if (!question) {
+      prefetchedInfoPromiseRef.current = null;
+      prefetchedImagePromiseRef.current = null;
+      prefetchedHintPromiseRef.current = null;
+      return;
+    }
+    const infoPromise = getCountryInfo(question.country.name, question.country.capital);
+    prefetchedInfoPromiseRef.current = infoPromise;
+
+    const imagePromise = infoPromise.then(({ info }) => {
+      if (info?.photoPrompt) {
+        return getCountryImage(info.photoPrompt);
+      }
+      return Promise.resolve(null);
+    });
+    prefetchedImagePromiseRef.current = imagePromise;
+    prefetchedHintPromiseRef.current = getHint(question);
+  }, []);
+
   const setupNewQuestion = useCallback(async () => {
-    setGameStatus('loading_question');
     setIsCorrect(null);
     setSpellingMistake(false);
     setUserAnswer('');
@@ -52,34 +76,84 @@ const App: React.FC = () => {
     setSources([]);
     setError(null);
     
-    try {
-      const randomCountry = await getRandomCountry();
-      if (!randomCountry) {
-        throw new Error("Could not fetch a new country.");
-      }
-      const questionType = Math.random() > 0.5 ? 'ask_capital' : 'ask_country';
-      setCurrentQuestion({ country: randomCountry, type: questionType });
+    if (nextQuestion) {
+      setCurrentQuestion(nextQuestion);
+      prefetchAnswerDetails(nextQuestion);
+      setNextQuestion(null);
       setGameStatus('playing');
-    } catch (e) {
-      setError("Failed to start a new round. Please refresh the page.");
-      setGameStatus('error');
+    } else {
+      setGameStatus('loading_question');
+      try {
+        const randomCountry = await getRandomCountry();
+        if (!randomCountry) {
+          throw new Error("Could not fetch a new country.");
+        }
+        // FIX: Explicitly define the type as QuestionType to prevent it from being inferred as a generic string.
+        const questionType: QuestionType = Math.random() > 0.5 ? 'ask_capital' : 'ask_country';
+        const newQuestion = { country: randomCountry, type: questionType };
+        setCurrentQuestion(newQuestion);
+        prefetchAnswerDetails(newQuestion);
+        setGameStatus('playing');
+      } catch (e) {
+        setError("Failed to start a new round. Please refresh the page.");
+        setGameStatus('error');
+      }
     }
-  }, []);
+  }, [nextQuestion, prefetchAnswerDetails]);
 
+  // Effect for initial load only
   useEffect(() => {
     setupNewQuestion();
-  }, [setupNewQuestion]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleHintRequest = async () => {
     if (!currentQuestion) return;
     setGameStatus('loading_hint');
     try {
-      const hintText = await getHint(currentQuestion);
-      setHint(hintText);
+      if (prefetchedHintPromiseRef.current) {
+        const hintText = await prefetchedHintPromiseRef.current;
+        setHint(hintText);
+      } else {
+        // Fallback in case prefetching failed
+        const hintText = await getHint(currentQuestion);
+        setHint(hintText);
+      }
     } catch (e) {
       setError("Failed to fetch a hint.");
     } finally {
       setGameStatus('playing');
+    }
+  };
+
+  const moveToAnswerScreen = async () => {
+    // Pre-fetch the next question in the background.
+    getRandomCountry().then(country => {
+        if (country) {
+            const type: QuestionType = Math.random() > 0.5 ? 'ask_capital' : 'ask_country';
+            setNextQuestion({ country, type });
+        }
+    }).catch(err => {
+        console.error("Failed to pre-fetch next question:", err);
+    });
+    
+    setGameStatus('loading_info');
+    try {
+      const infoPromise = prefetchedInfoPromiseRef.current;
+      const imagePromise = prefetchedImagePromiseRef.current;
+
+      const [{ info, sources }, imageData] = await Promise.all([
+          infoPromise || Promise.resolve({ info: null, sources: [] }),
+          imagePromise || Promise.resolve(null)
+      ]);
+      
+      setInfo(info);
+      setSources(sources);
+      setCountryImage(imageData);
+    } catch (e) {
+      setError("Failed to fetch country information.");
+    } finally {
+      setGameStatus('answered');
     }
   };
 
@@ -102,21 +176,16 @@ const App: React.FC = () => {
     const correct = perfectMatch || isVeryClose;
     setIsCorrect(correct);
     setSpellingMistake(correct && !perfectMatch);
-    setGameStatus('loading_info');
     
-    try {
-      const { info, sources } = await getCountryInfo(currentQuestion.country.name, currentQuestion.country.capital);
-      setInfo(info);
-      setSources(sources);
-      if (info?.photoPrompt) {
-          const imageData = await getCountryImage(info.photoPrompt);
-          setCountryImage(imageData);
-      }
-    } catch (e) {
-      setError("Failed to fetch country information.");
-    } finally {
-      setGameStatus('answered');
-    }
+    await moveToAnswerScreen();
+  };
+
+  const handleGiveUp = async () => {
+    if (!currentQuestion) return;
+    setIsCorrect(false);
+    setSpellingMistake(false);
+    setUserAnswer('');
+    await moveToAnswerScreen();
   };
 
   const renderQuizView = () => {
@@ -152,6 +221,14 @@ const App: React.FC = () => {
               {gameStatus === 'loading_hint' ? <LoadingSpinner size={5} /> : 'I need a hint'}
             </button>
           </div>
+           <button 
+            type="button" 
+            onClick={handleGiveUp} 
+            className="text-center text-gray-500 hover:text-gray-700 disabled:text-gray-300 transition hover:underline"
+            disabled={gameStatus === 'loading_hint'}
+          >
+            I give up
+          </button>
         </form>
       </div>
     );
@@ -246,25 +323,21 @@ const App: React.FC = () => {
       case 'answered':
         return renderAnswerView();
       case 'loading_info':
-        return renderLoadingView("Putting together some cool info for you...");
+        return renderLoadingView("Putting together some cool info...");
       case 'loading_question':
-          return renderLoadingView("Fetching a new challenge...");
+        return renderLoadingView("Fetching a new challenge...");
+      case 'error':
+        return <div className="text-red-500 text-center">{error}</div>;
       default:
         return <LoadingSpinner size={12} />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl">
-        <header className="text-center mb-8">
-            <h1 className="text-4xl md:text-5xl font-extrabold text-gray-800">Geo Genius</h1>
-            <p className="text-lg text-gray-600 mt-2">How well do you know the world?</p>
-        </header>
-        <main className="bg-white rounded-xl shadow-lg p-6 sm:p-8 transition-all duration-300 min-h-[400px] flex items-center justify-center">
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+        <main className="bg-white rounded-2xl shadow-xl p-6 sm:p-8 w-full max-w-2xl min-h-[400px] flex items-center justify-center">
             {renderContent()}
         </main>
-      </div>
     </div>
   );
 };
